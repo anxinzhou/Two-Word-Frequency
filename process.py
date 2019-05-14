@@ -1,14 +1,11 @@
-# from sklearn.feature_extraction.text import CountVectorizer
-# from scipy.sparse import coo_matrix
-# from scipy.sparse import save_npz
-# from scipy.sparse import load_npz
-# import numpy as np
-
 import pickle
 import os
 import time
 import re
 from math import sqrt
+from scipy.sparse import csr_matrix
+from scipy.sparse import save_npz
+from scipy.sparse import load_npz
 import gmpy
 
 
@@ -19,7 +16,7 @@ import gmpy
 # enDict = enchant.Dict('en_US')
 
 
-rootDir = "/Users/anxin/Downloads/maildir"
+rootDir = "maildir"
 targetFiles = "./target.data"
 contentFile = "./content.data"
 dictionaryPath = "./dictionary.data"
@@ -30,17 +27,19 @@ prunedVectorPath = "./prunedCountVector.data"
 oneWordPath = "./oneWord.data"
 prunedOneWordPath = "./prunedOneWord.data"
 twoWordPath = "./twoWord.data"
+reverseIndexPath = "./reverseIndex.data"
 
 stop_words = {'the', 'and', 'to', 'of', 'i', 'a', 'in', 'it', 'that', 'is',
               'you', 'my', 'with', 'not', 'his', 'this', 'but', 'for',
               'me', 's', 'he', 'be', 'as', 'so', 'him', 'your'}
-targetAmount = 30000
+fileTargetAmount = 50000
+wordTargetAmount = 10000
 maxRatio = 0.9
 minRatio = 0.001
 twoWordRatio = 0.001
 
 
-def get_files(path, save=True, file_path=targetFiles, target_amount=targetAmount):
+def get_files(path, save=True, file_path=targetFiles, target_amount=fileTargetAmount):
     if os.path.exists(file_path):
         print("file paths already saved in file, skip doing again")
         return load_target_files(file_path)
@@ -80,15 +79,57 @@ def load_target_files(path):
 
 def parse_file(path):
     with open(path, 'r') as f:
+        c = []
         try:
-            content = f.read()
+            lines = f.readlines()
+            # print(lines)
+            reach_head = False
+            for line in lines:
+                if line.startswith('X-FileName'):
+                    reach_head = True
+                    continue
+                # skip mail header
+                if not reach_head:
+                    continue
+                # skip mail forward and appended mail
+                if 'Forwarded by' in line:
+                    continue
+                if 'Original Message' in line:
+                    continue
+                if 'From:' in line:
+                    continue
+                if 'To:' in line:
+                    continue
+                if 'Cc:' in line:
+                    continue
+                if 'Sent:' in line:
+                    continue
+                if 'Subject:' in line:
+                    continue
+                if 'cc:' in line:
+                    continue
+                if 'subject:' in line:
+                    continue
+                if 'Subject:' in line:
+                    continue
+                if 'from:' in line:
+                    continue
+                # line = line.replace('\n',' ')
+                line = re.sub(r"[^\s]*@[^\s]*", " ", line)
+                line = re.sub(r"[^A-Za-z]", " ", line).lower()
+                # print(line.split())
+                tmp = line.split()
+                line = [l for l in tmp if len(l)>=2 and l not in stop_words]
+                line = ' '.join(line)
+                if len(line)!=0:
+                    c.append(line)
+                    # print(line)
         except UnicodeDecodeError:
             print(path)
             return ''
-        content = re.sub(r"[^A-Za-z]", " ", content).lower()
         # c_lists = content.split()
         # content = ' '.join([c for c in c_lists if enDict.check(c)]) # check if is a word
-    return content
+    return ' '.join(c)
 
 
 def get_corpus(fs, save=True, file_path=contentFile):
@@ -173,85 +214,50 @@ def build_one_word_vector(bit_map, save=True, one_word_path=oneWordPath):
     return one_word
 
 
-def build_two_word_vector(bit_map, cps, save=True, two_word_path=twoWordPath):
-    if os.path.exists(two_word_path):
-        print("two word already exists")
-        return load_target_files(two_word_path)
-    print("building two word")
-    print("len of bitmap", len(bit_map))
-    length = len(bit_map)
-    cap = len(bit_map) * int(sqrt(len(bit_map)))
-    data = [0] * cap
-    row = [0] * cap
-    col = [0] * cap
-    start = time.time()
-    cur_number = 0
-    skip_count = 0
-    for i in range(length - 1):
-        if i % 500 == 0:
-            print("building two vector", i, "consuming time", time.time() - start, "s", "cur number", cur_number,
-                  "skip count", skip_count)
-        for j in range(i + 1, length):
-            count = gmpy.popcount(bit_map[i] & bit_map[j])
-            if count != 0:
-                # print(count)
-                if count < len(cps) * twoWordRatio:
-                    # print("low frequency skip")
-                    skip_count += 1
-                    continue
-                if cur_number == cap:  # extend pre-allocated space
-                    data.extend([0] * (cap // 2))
-                    row.extend([0] * (cap // 2))
-                    col.extend([0] * (cap // 2))
-                    cap += (cap // 2)
-                data[cur_number] = count
-                row[cur_number] = i
-                col[cur_number] = j
-                cur_number += 1
-    data = data[:cur_number]
-    row = row[:cur_number]
-    col = col[:cur_number]
-    print("two word total time", time.time() - start, "s")
-    two_word = [data, row, col]
-    if save:
-        print("save two word to file")
-        save_target_files(two_word, two_word_path)
-    return two_word
-
-
-def build_pruned_dictionary(cps, save=True, pruned_dictionary_path=prunedDictionaryPath):
-    if os.path.exists(pruned_dictionary_path):
-        print("pruned dictionary already exists load from file")
-        return load_target_files(pruned_dictionary_path)
-    print("building pruned dictionary")
-    dictionary = build_dictionary(cps, dictionaryPath)
-    counter = count_corpus(cps, dictionary)
-
-    one_word_vector = build_one_word_vector(counter)
-
-    length = len(cps)
-    new_dic = dict()
-    for k in list(dictionary.keys()):
-        count = one_word_vector[dictionary[k]]
-        if length * minRatio <= count < length * maxRatio:
-            new_dic[k] = len(new_dic)
-    dictionary = new_dic
-    if save:
-        save_target_files(dictionary, pruned_dictionary_path)
-    return dictionary
+def cal_reverse_index(word_list, file_corpus, reverse_index_path=reverseIndexPath):
+    if os.path.exists(reverse_index_path):
+        print("corpus already saved in file, skip doing again")
+        return  load_npz(reverse_index_path)
+    row = []
+    col = []
+    data = []
+    for i,w in enumerate(word_list):
+        index = [0]*len(file_corpus)
+        for j,c in enumerate(file_corpus):
+            if w in c:
+                row.append(i)
+                col.append(j)
+                data.append(1)
+    res = csr_matrix((data,(row,col)),shape=(len(word_list),len(file_corpus)))
+    save_npz(reverse_index_path,res)
+    return res
 
 
 files = get_files(rootDir)
 corpus = get_corpus(files)
-prunedDictionary = build_pruned_dictionary(corpus)
-print("total words:", len(prunedDictionary))
-# print(prunedDictionary.keys())
-
-# get bitmap
-bitMap = count_corpus(corpus, prunedDictionary, save=True, vector_path=prunedVectorPath)
-
-# calculate one_word
-oneWord = build_one_word_vector(bitMap, save=True, one_word_path=prunedOneWordPath)
+dictionary = build_dictionary(corpus)
+bitMap = count_corpus(corpus, dictionary)
+oneWord = build_one_word_vector(bitMap)
+wordFrequency = [[w,c] for w,c in zip(dictionary,oneWord)]
+wordFrequency.sort(key=lambda x:x[1],reverse=True)
+w = [w[0] for w in wordFrequency[:wordTargetAmount]]
+# print(wordFrequency)
+print("len of dictionary",len(dictionary))
+print("len of one word",len(oneWord))
+print("max frequency",max(oneWord))
+reverseIndex = cal_reverse_index(w,corpus)
+print (reverseIndex)
+# print(corpus)
+# prunedDictionary = build_pruned_dictionary(corpus)
+# print("total words:", len(prunedDictionary))
+# # print(prunedDictionary.keys())
+#
+# # get bitmap
+# bitMap = count_corpus(corpus, prunedDictionary, save=True, vector_path=prunedVectorPath)
+#
+# # calculate one_word
+# oneWord = build_one_word_vector(bitMap, save=True, one_word_path=prunedOneWordPath)
+# print(oneWord)
 # calculate two_word
-twoWord = build_two_word_vector(bitMap, corpus)
-print("len two word:", len(twoWord[0]))
+# twoWord = build_two_word_vector(bitMap, corpus)
+# print("len two word:", len(twoWord[0]))

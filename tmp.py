@@ -182,3 +182,71 @@
 #     if save:
 #         save_npz(two_word_path, two_word)
 #     return two_word
+#
+#
+# def build_two_word_vector(bit_map, cps, save=True, two_word_path=twoWordPath):
+#     if os.path.exists(two_word_path):
+#         print("two word already exists")
+#         return load_target_files(two_word_path)
+#     print("building two word")
+#     print("len of bitmap", len(bit_map))
+#     length = len(bit_map)
+#     cap = len(bit_map) * int(sqrt(len(bit_map)))
+#     data = [0] * cap
+#     row = [0] * cap
+#     col = [0] * cap
+#     start = time.time()
+#     cur_number = 0
+#     skip_count = 0
+#     for i in range(length - 1):
+#         if i % 500 == 0:
+#             print("building two vector", i, "consuming time", time.time() - start, "s", "cur number", cur_number,
+#                   "skip count", skip_count)
+#         for j in range(i + 1, length):
+#             count = gmpy.popcount(bit_map[i] & bit_map[j])
+#             if count != 0:
+#                 # print(count)
+#                 if count < len(cps) * twoWordRatio:
+#                     # print("low frequency skip")
+#                     skip_count += 1
+#                     continue
+#                 if cur_number == cap:  # extend pre-allocated space
+#                     data.extend([0] * (cap // 2))
+#                     row.extend([0] * (cap // 2))
+#                     col.extend([0] * (cap // 2))
+#                     cap += (cap // 2)
+#                 data[cur_number] = count
+#                 row[cur_number] = i
+#                 col[cur_number] = j
+#                 cur_number += 1
+#     data = data[:cur_number]
+#     row = row[:cur_number]
+#     col = col[:cur_number]
+#     print("two word total time", time.time() - start, "s")
+#     two_word = [data, row, col]
+#     if save:
+#         print("save two word to file")
+#         save_target_files(two_word, two_word_path)
+#     return two_word
+#
+#
+# def build_pruned_dictionary(cps, save=True, pruned_dictionary_path=prunedDictionaryPath):
+#     if os.path.exists(pruned_dictionary_path):
+#         print("pruned dictionary already exists load from file")
+#         return load_target_files(pruned_dictionary_path)
+#     print("building pruned dictionary")
+#     dictionary = build_dictionary(cps, True,dictionaryPath)
+#     counter = count_corpus(cps, dictionary)
+#
+#     one_word_vector = build_one_word_vector(counter)
+#
+#     length = len(cps)
+#     new_dic = dict()
+#     for k in list(dictionary.keys()):
+#         count = one_word_vector[dictionary[k]]
+#         if length * minRatio <= count < length * maxRatio:
+#             new_dic[k] = len(new_dic)
+#     dictionary = new_dic
+#     if save:
+#         save_target_files(dictionary, pruned_dictionary_path)
+#     return dictionary
