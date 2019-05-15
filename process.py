@@ -8,7 +8,6 @@ from scipy.sparse import save_npz
 from scipy.sparse import load_npz
 import gmpy
 
-
 # use to check if is a word
 # import enchant
 # from nltk.stem.porter import PorterStemmer
@@ -34,9 +33,6 @@ stop_words = {'the', 'and', 'to', 'of', 'i', 'a', 'in', 'it', 'that', 'is',
               'me', 's', 'he', 'be', 'as', 'so', 'him', 'your'}
 fileTargetAmount = 50000
 wordTargetAmount = 10000
-maxRatio = 0.9
-minRatio = 0.001
-twoWordRatio = 0.001
 
 
 def get_files(path, save=True, file_path=targetFiles, target_amount=fileTargetAmount):
@@ -119,9 +115,9 @@ def parse_file(path):
                 line = re.sub(r"[^A-Za-z]", " ", line).lower()
                 # print(line.split())
                 tmp = line.split()
-                line = [l for l in tmp if len(l)>=2 and l not in stop_words]
+                line = [l for l in tmp if len(l) >= 2 and l not in stop_words]
                 line = ' '.join(line)
-                if len(line)!=0:
+                if len(line) != 0:
                     c.append(line)
                     # print(line)
         except UnicodeDecodeError:
@@ -162,7 +158,7 @@ def build_dictionary(cps, save=True, file_path=dictionaryPath):
     for i, cp in enumerate(cps):
         words = cp.split()
         for w in words:
-            if w in stop_words or len(w) <= 2 or w in dic:
+            if w in dic:
                 continue
             dic[w] = len(dic)
 
@@ -214,50 +210,40 @@ def build_one_word_vector(bit_map, save=True, one_word_path=oneWordPath):
     return one_word
 
 
-def cal_reverse_index(word_list, file_corpus, reverse_index_path=reverseIndexPath):
+def cal_reverse_index(word_list, file_corpus, save=True,reverse_index_path=reverseIndexPath):
     if os.path.exists(reverse_index_path):
         print("corpus already saved in file, skip doing again")
-        return  load_npz(reverse_index_path)
+        return load_npz(reverse_index_path)
     row = []
     col = []
     data = []
-    for i,w in enumerate(word_list):
-        index = [0]*len(file_corpus)
-        for j,c in enumerate(file_corpus):
-            if w in c:
+    for j, cp in enumerate(file_corpus):
+        cp = cp.split()
+        seen = set()
+        for c in cp:
+            if c in word_list and c not in seen:
+                i = word_list[c]
                 row.append(i)
                 col.append(j)
                 data.append(1)
-    res = csr_matrix((data,(row,col)),shape=(len(word_list),len(file_corpus)))
-    save_npz(reverse_index_path,res)
+                seen.add(c)
+    res = csr_matrix((data, (row, col)), shape=(len(word_list), len(file_corpus)))
+    if save:
+        save_npz(reverse_index_path, res)
     return res
 
 
-files = get_files(rootDir)
-corpus = get_corpus(files)
-dictionary = build_dictionary(corpus)
-bitMap = count_corpus(corpus, dictionary)
-oneWord = build_one_word_vector(bitMap)
-wordFrequency = [[w,c] for w,c in zip(dictionary,oneWord)]
-wordFrequency.sort(key=lambda x:x[1],reverse=True)
-w = [w[0] for w in wordFrequency[:wordTargetAmount]]
+files = get_files(rootDir,targetFiles,fileTargetAmount)
+corpus = get_corpus(files,save=True,file_path=contentFile)
+dictionary = build_dictionary(corpus,save=True,file_path=dictionaryPath)
+bitMap = count_corpus(corpus, dictionary,save=True,vector_path=vectorPath)
+oneWord = build_one_word_vector(bitMap,save=True,one_word_path=oneWordPath)
+wordFrequency = [[w, c] for w, c in zip(dictionary, oneWord)]
+wordFrequency.sort(key=lambda x: x[1], reverse=True)
+w = {w[0]: i for i, w in enumerate(wordFrequency[:wordTargetAmount])}
 # print(wordFrequency)
-print("len of dictionary",len(dictionary))
-print("len of one word",len(oneWord))
-print("max frequency",max(oneWord))
-reverseIndex = cal_reverse_index(w,corpus)
-print (reverseIndex)
-# print(corpus)
-# prunedDictionary = build_pruned_dictionary(corpus)
-# print("total words:", len(prunedDictionary))
-# # print(prunedDictionary.keys())
-#
-# # get bitmap
-# bitMap = count_corpus(corpus, prunedDictionary, save=True, vector_path=prunedVectorPath)
-#
-# # calculate one_word
-# oneWord = build_one_word_vector(bitMap, save=True, one_word_path=prunedOneWordPath)
-# print(oneWord)
-# calculate two_word
-# twoWord = build_two_word_vector(bitMap, corpus)
-# print("len two word:", len(twoWord[0]))
+print("len of dictionary", len(dictionary))
+print("len of one word", len(oneWord))
+print("max frequency", max(oneWord))
+reverseIndex = cal_reverse_index(w, corpus, save=True, reverse_index_path= reverseIndexPath)
+print(reverseIndex)
