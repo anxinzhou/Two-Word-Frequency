@@ -114,8 +114,15 @@ def parse_file(path):
                 line = re.sub(r"[^\s]*@[^\s]*", " ", line)
                 line = re.sub(r"[^A-Za-z]", " ", line).lower()
                 # print(line.split())
+
+                # remove duplicate words
+                seen = set()
                 tmp = line.split()
-                line = [l for l in tmp if len(l) >= 2 and l not in stop_words]
+                line = []
+                for l in tmp:
+                    if len(l) >= 2 and l not in stop_words and l not in seen:
+                        seen.add(l)
+                        line.append(l)
                 line = ' '.join(line)
                 if len(line) != 0:
                     c.append(line)
@@ -135,6 +142,7 @@ def get_corpus(fs, save=True, file_path=contentFile):
     print("geting corpus from files")
     cps = []
     skip_count = 0
+    start = time.time()
     for i in range(len(fs)):
         content = parse_file(fs[i])
         if len(content) == 0:
@@ -143,6 +151,8 @@ def get_corpus(fs, save=True, file_path=contentFile):
         cps.append(content)
     print("skip:", skip_count)
     print("total:", len(cps))
+    end = time.time()
+    print("get corpus consuming time", end - start, 's')
     if save:
         print("write content to " + contentFile)
         save_target_files(cps, file_path)
@@ -155,13 +165,15 @@ def build_dictionary(cps, save=True, file_path=dictionaryPath):
         return load_target_files(file_path)
     print("building dictionary")
     dic = dict()
+    start = time.time()
     for i, cp in enumerate(cps):
         words = cp.split()
         for w in words:
             if w in dic:
                 continue
             dic[w] = len(dic)
-
+    end = time.time()
+    print("building dictionary consuming time", end - start, 's')
     # save
     if save:
         save_target_files(dic, file_path)
@@ -210,7 +222,7 @@ def build_one_word_vector(bit_map, save=True, one_word_path=oneWordPath):
     return one_word
 
 
-def cal_reverse_index(word_list, file_corpus, save=True,reverse_index_path=reverseIndexPath):
+def cal_reverse_index(word_list, file_corpus, save=True, reverse_index_path=reverseIndexPath):
     if os.path.exists(reverse_index_path):
         print("corpus already saved in file, skip doing again")
         return load_npz(reverse_index_path)
@@ -233,11 +245,11 @@ def cal_reverse_index(word_list, file_corpus, save=True,reverse_index_path=rever
     return res
 
 
-files = get_files(rootDir,targetFiles,fileTargetAmount)
-corpus = get_corpus(files,save=True,file_path=contentFile)
-dictionary = build_dictionary(corpus,save=True,file_path=dictionaryPath)
-bitMap = count_corpus(corpus, dictionary,save=True,vector_path=vectorPath)
-oneWord = build_one_word_vector(bitMap,save=True,one_word_path=oneWordPath)
+files = get_files(rootDir, True, targetFiles, fileTargetAmount)
+corpus = get_corpus(files, save=True, file_path=contentFile)
+dictionary = build_dictionary(corpus, save=True, file_path=dictionaryPath)
+bitMap = count_corpus(corpus, dictionary, save=True, vector_path=vectorPath)
+oneWord = build_one_word_vector(bitMap, save=True, one_word_path=oneWordPath)
 wordFrequency = [[w, c] for w, c in zip(dictionary, oneWord)]
 wordFrequency.sort(key=lambda x: x[1], reverse=True)
 w = {w[0]: i for i, w in enumerate(wordFrequency[:wordTargetAmount])}
@@ -245,5 +257,5 @@ w = {w[0]: i for i, w in enumerate(wordFrequency[:wordTargetAmount])}
 print("len of dictionary", len(dictionary))
 print("len of one word", len(oneWord))
 print("max frequency", max(oneWord))
-reverseIndex = cal_reverse_index(w, corpus, save=True, reverse_index_path= reverseIndexPath)
+reverseIndex = cal_reverse_index(w, corpus, save=True, reverse_index_path=reverseIndexPath)
 print(reverseIndex)
