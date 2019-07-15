@@ -2,11 +2,18 @@ import pickle
 import os
 import time
 import re
-from math import sqrt
 from scipy.sparse import csr_matrix
 from scipy.sparse import save_npz
 from scipy.sparse import load_npz
 import gmpy
+import numpy as np
+from math import sqrt
+from numpy import linalg as LA
+import random
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+from mpl_toolkits import mplot3d
 
 # use to check if is a word
 # import enchant
@@ -16,246 +23,301 @@ import gmpy
 
 
 rootDir = "maildir"
-targetFiles = "./target.data"
-contentFile = "./content.data"
-dictionaryPath = "./dictionary.data"
-prunedDictionaryPath = "./prunedDictionary.data"
+targetFiles = "target.data"
+contentFile = "content.data"
+dictionaryPath = "dictionary.data"
+prunedDictionaryPath = "prunedDictionary.data"
 
-vectorPath = "./countVector.data"
-prunedVectorPath = "./prunedCountVector.data"
-oneWordPath = "./oneWord.data"
-prunedOneWordPath = "./prunedOneWord.data"
-twoWordPath = "./twoWord.data"
-reverseIndexPath = "./reverseIndex.data"
+vectorPath = "countVector.data"
+prunedVectorPath = "prunedCountVector.data"
+oneWordPath = "oneWord.data"
+prunedOneWordPath = "prunedOneWord.data"
+twoWordPath = "twoWord.data.npy"
+reverseIndexPath = "reverseIndex.data"
 
-stop_words = {'the', 'and', 'to', 'of', 'i', 'a', 'in', 'it', 'that', 'is',
-              'you', 'my', 'with', 'not', 'his', 'this', 'but', 'for',
-              'me', 's', 'he', 'be', 'as', 'so', 'him', 'your'}
-fileTargetAmount = 50000
-wordTargetAmount = 10000
+calibratedBitMapPath = "calibratedVector.data"
+wordIDVectorPath = "wordIDVector.npy"
+kmeansLabelPath = "kmeansLabel.npy"
+pcaPath = "pca.npy"
 
+egPath = "eg.data"
 
-def get_files(path, save=True, file_path=targetFiles, target_amount=fileTargetAmount):
-    if os.path.exists(file_path):
-        print("file paths already saved in file, skip doing again")
-        return load_target_files(file_path)
-    print("geting files from root dir")
-    files = []
-    dfs_dir(files, path, target_amount)
-    if save:
-        print("write to " + file_path)
-        save_target_files(files, file_path)
-    return files
+stop_words = {'ourselves', 'hers', 'between', 'yourself', 'but', 'again', 'there', 'about', 'once', 'during', 'out',
+              'very', 'having', 'with', 'they', 'own', 'an', 'be', 'some', 'for', 'do', 'its', 'yours', 'such', 'into',
+              'of', 'most', 'itself', 'other', 'off', 'is', 's', 'am', 'or', 'who', 'as', 'from', 'him', 'each', 'the',
+              'themselves', 'until', 'below', 'are', 'we', 'these', 'your', 'his', 'through', 'don', 'nor', 'me',
+              'were', 'her', 'more', 'himself', 'this', 'down', 'should', 'our', 'their', 'while', 'above', 'both',
+              'up', 'to', 'ours', 'had', 'she', 'all', 'no', 'when', 'at', 'any', 'before', 'them', 'same', 'and',
+              'been', 'have', 'in', 'will', 'on', 'does', 'yourselves', 'then', 'that', 'because', 'what', 'over',
+              'why', 'so', 'can', 'did', 'not', 'now', 'under', 'he', 'you', 'herself', 'has', 'just', 'where', 'too',
+              'only', 'myself', 'which', 'those', 'i', 'after', 'few', 'whom', 't', 'being', 'if', 'theirs', 'my',
+              'against', 'a', 'by', 'doing', 'it', 'how', 'further', 'was', 'here', 'than'}
+fileTargetAmount = 100000
+wordTargetAmount = 5000
+sampleCount = 200
+clusterNum = 32
 
-
-def dfs_dir(files, path, target_amount):
-    if len(files) == target_amount:
-        return
-    if os.path.isdir(path) and not path.startswith('.'):
-        subs = os.listdir(path)
-        for sub in subs:
-            dfs_dir(files, os.path.join(path, sub), target_amount)
-            if len(files) == target_amount:
-                break
-    elif os.path.isfile(path) and path.endswith('.'):
-        files.append(path)
-    else:
-        print("skip " + path)
+prob0To1 = 0.3
+prob1To0 = 0.1
 
 
-def save_target_files(fs, path):
-    with open(path, 'wb') as fileHandler:
-        pickle.dump(fs, fileHandler)
-
-
-def load_target_files(path):
-    with open(path, 'rb') as fileHandler:
-        return pickle.load(fileHandler)
-
-
-def parse_file(path):
-    with open(path, 'r') as f:
-        c = []
-        try:
-            lines = f.readlines()
-            # print(lines)
-            reach_head = False
-            for line in lines:
-                if line.startswith('X-FileName'):
-                    reach_head = True
-                    continue
-                # skip mail header
-                if not reach_head:
-                    continue
-                # skip mail forward and appended mail
-                if 'Forwarded by' in line:
-                    continue
-                if 'Original Message' in line:
-                    continue
-                if 'From:' in line:
-                    continue
-                if 'To:' in line:
-                    continue
-                if 'Cc:' in line:
-                    continue
-                if 'Sent:' in line:
-                    continue
-                if 'Subject:' in line:
-                    continue
-                if 'cc:' in line:
-                    continue
-                if 'subject:' in line:
-                    continue
-                if 'Subject:' in line:
-                    continue
-                if 'from:' in line:
-                    continue
-                # line = line.replace('\n',' ')
-                line = re.sub(r"[^\s]*@[^\s]*", " ", line)
-                line = re.sub(r"[^A-Za-z]", " ", line).lower()
-                # print(line.split())
-
-                # remove duplicate words
-                seen = set()
-                tmp = line.split()
-                line = []
-                for l in tmp:
-                    if len(l) >= 2 and l not in stop_words and l not in seen:
-                        seen.add(l)
-                        line.append(l)
-                line = ' '.join(line)
-                if len(line) != 0:
-                    c.append(line)
-                    # print(line)
-        except UnicodeDecodeError:
-            print(path)
-            return ''
-        # c_lists = content.split()
-        # content = ' '.join([c for c in c_lists if enDict.check(c)]) # check if is a word
-    return ' '.join(c)
-
-
-def get_corpus(fs, save=True, file_path=contentFile):
-    if os.path.exists(contentFile):
-        print("corpus already saved in file, skip doing again")
-        return load_target_files(file_path)
-    print("geting corpus from files")
-    cps = []
-    skip_count = 0
-    start = time.time()
-    for i in range(len(fs)):
-        content = parse_file(fs[i])
-        if len(content) == 0:
-            skip_count += 1
+def merge_cluster(ts, ws, index):
+    new_ts = []
+    new_ws = []
+    base = ts[index]
+    base_ws = ws[index]
+    for i, t in enumerate(ts):
+        if i == index:
             continue
-        cps.append(content)
-    print("skip:", skip_count)
-    print("total:", len(cps))
-    end = time.time()
-    print("get corpus consuming time", end - start, 's')
-    if save:
-        print("write content to " + contentFile)
-        save_target_files(cps, file_path)
-    return cps
+        r = np.sum(np.logical_and(base, t))
+        if r == 0:
+            new_ts.append(t)
+            new_ws.append(ws[i])
+        else:
+            base = np.logical_xor(base, t)
+            base_ws.extend(ws[i])
+    new_ws.append(base_ws)
+    new_ts.append(base)
+    ts[:] = new_ts
+    ws[:] = new_ws
 
 
-def build_dictionary(cps, save=True, file_path=dictionaryPath):
-    if os.path.exists(file_path):
-        print("dic already exists, load from file")
-        return load_target_files(file_path)
-    print("building dictionary")
-    dic = dict()
-    start = time.time()
-    for i, cp in enumerate(cps):
-        words = cp.split()
-        for w in words:
-            if w in dic:
-                continue
-            dic[w] = len(dic)
-    end = time.time()
-    print("building dictionary consuming time", end - start, 's')
-    # save
-    if save:
-        save_target_files(dic, file_path)
-    return dic
+def cluster_reverse_index(word_frequency, reverse_index):
+    s = time.time()
+    ts = []
+    ws = []
+    for i, w in enumerate(reverse_index):
+        merged = False
+        for j, t in enumerate(ts):
+            r = np.sum(np.logical_and(t, w))
+            if r != 0:
+                ts[j] = np.logical_xor(ts[j], w)
+                ws[j].append(word_frequency[i])
+                merge_cluster(ts, ws, j)
+                merged = True
+                break
+        if not merged:  # a new cluster
+            ts.append(w)
+            ws.append([word_frequency[i]])
+    e = time.time()
+    print("cluster time:", e - s, "s")
+    return ws
 
 
-def count_corpus(cps, dic, save=True, vector_path=vectorPath):
+def test_two_word():
+    # get files from path
+    files = get_files(rootDir, True, targetFiles, fileTargetAmount)
+
+    # build corpus from file
+    corpus = get_corpus(files, save=True, file_path=contentFile)
+
+    # build dictionary from corpus
+    dictionary = build_dictionary(corpus, save=True, file_path=dictionaryPath)
+    print("total word counts", len(dictionary))
+
+    # build bit map
+    bitMap = count_corpus(corpus, dictionary, save=True, vector_path=vectorPath)
+
+    # build one word vector
+    oneWord = build_one_word_vector(bitMap, save=False, one_word_path=oneWordPath)
+    # print(oneWord)
+    # calibrate dictionary
+    # print(list(dictionary.items())[:100])
+    wordFrequency = [[w, c] for w, c in zip(dictionary, oneWord)]
+    # print(wordFrequency[:100])
+    wordFrequency.sort(key=lambda x: x[1], reverse=True)
+    wordFrequency = wordFrequency[sampleCount:wordTargetAmount + sampleCount]
+    # print(list(w.items())[:10])
+    # for w,c in wordFrequency[200:300]:
+    #     print(w,c)
+
+    # build reverse index
+    # reverseIndex = cal_reverse_index(w, corpus, save=True, reverse_index_path=reverseIndexPath)
+    # s = time.time()
+    # reverseIndex = reverseIndex.todense()
+
+    # build two word vector
+    pathPrefix = str(wordTargetAmount) + "_"
+    w = {w[0]: i for i, w in enumerate(wordFrequency[:wordTargetAmount])}
+    bitMap2 = count_calibrated_corpus(corpus, w, save=True, vector_path=pathPrefix + calibratedBitMapPath, dp=False)
+    oneWord2 = build_one_word_vector2(bitMap2)
+    print(oneWord2)
+    with open(pathPrefix + 'word_frequency.txt', 'w') as f:
+        for c in oneWord2:
+            f.write(str(c) + "\n")
+    print("len of bitmap2", len(bitMap2))
+    print("calibrate words length", len(w))
+    twoWord = build_two_word_vector(bitMap2, corpus, save=True, two_word_path=pathPrefix + twoWordPath)
+    sampleWords = 1
+    print(wordFrequency[sampleWords][0], wordFrequency[sampleWords][1])
+    with open(pathPrefix + "cocurrency.txt", 'w') as f:
+        for c in twoWord[0]:
+            f.write(str(c) + "\n")
+    w = cal_eg(twoWord, save=True, eg_path=pathPrefix + egPath)
+    with open(pathPrefix + 'Eigenvalues.txt', 'w') as f:
+        for c in w:
+            f.write(str(c) + "\n")
+
+
+def build_word_id_vector(words, cps, save=True, vector_path=wordIDVectorPath):
     if os.path.exists(vector_path):
-        print("counter vector already exists, load from file")
-        return load_target_files(vector_path)
-    print("counting corpus")
+        print("word id vector already exist")
+        return np.load(vector_path)
     start = time.time()
-    bit_map = [0] * len(dic)
-    for i in range(len(cps)):
-        words = cps[i].split()
-        seen = set()
-        for w in words:
-            if w in dic and w not in seen:
-                if i == 0:
-                    addition = 1
-                else:
-                    addition = 2 << (i - 1)
-                bit_map[dic[w]] += addition
-                seen.add(w)
+    w_id_vector = np.zeros((len(words), len(cps)))
+    for j, cp in enumerate(cps):
+        cp_words = cp.split()
+        cp_words_set = set(cp_words)
+        for i, w in enumerate(words):
+            if w in cp_words_set:
+                w_id_vector[i][j] = 1
+    if save:
+        print("save calibrated bitmap to file")
+        np.save(vector_path, w_id_vector)
     end = time.time()
-    print("counting corpus consuming time", end - start, 's')
-    if save:
-        save_target_files(bit_map, vector_path)
-    return bit_map
+    print("build word id vector time", end - start, 's')
+    return w_id_vector
 
 
-def build_one_word_vector(bit_map, save=True, one_word_path=oneWordPath):
-    # use sparse matrix
-    if os.path.exists(one_word_path):
-        print("one word already exists, load from file")
-        return load_target_files(one_word_path)
-    start = time.time()
-    print("building one word")
-    one_word = [0] * len(bit_map)
-    for i, v in enumerate(bit_map):
-        one_word[i] = gmpy.popcount(bit_map[i])
-    end = time.time()
-    print("building one word consuming time", end - start, "s")
-    if save:
-        save_target_files(one_word, one_word_path)
-    return one_word
+def test_word_vector_cluster():
+    # get files from path
+    files = get_files(rootDir, True, targetFiles, fileTargetAmount)
+
+    # build corpus from file
+    corpus = get_corpus(files, save=True, file_path=contentFile)
+
+    # build dictionary from corpus
+    dictionary = build_dictionary(corpus, save=True, file_path=dictionaryPath)
+    print("total word counts", len(dictionary))
+
+    # build bit map
+    bitMap = count_corpus(corpus, dictionary, save=True, vector_path=vectorPath)
+
+    # build one word vector
+    oneWord = build_one_word_vector(bitMap, save=False, one_word_path=oneWordPath)
+    # calibrate dictionary
+    # print(list(dictionary.items())[:100])
+    wordFrequency = [[w, c] for w, c in zip(dictionary, oneWord)]
+    # print(wordFrequency[:100])
+    wordFrequency.sort(key=lambda x: x[1], reverse=True)
+    wordFrequency = wordFrequency[sampleCount:wordTargetAmount + sampleCount]
+    # print(list(w.items())[:10])
+    # for w,c in wordFrequency[200:300]:
+    #     print(w,c)
+
+    # build reverse index
+    # reverseIndex = cal_reverse_index(w, corpus, save=True, reverse_index_path=reverseIndexPath)
+    # s = time.time()
+    # reverseIndex = reverseIndex.todense()
+
+    # build two word vector
+    pathPrefix = str(wordTargetAmount) + "_"
+    w = [w[0] for _, w in enumerate(wordFrequency[:wordTargetAmount])]
+    word_id_vector = build_word_id_vector(w, corpus, save=True, vector_path=pathPrefix + wordIDVectorPath)
+    kmeans_label_path = pathPrefix + str(clusterNum)+"_" + kmeansLabelPath
+
+    w = {w[0]: i for i, w in enumerate(wordFrequency[:wordTargetAmount])}
+    bitMap2 = count_calibrated_corpus(corpus, w, save=True, vector_path=pathPrefix + calibratedBitMapPath, dp=False)
+    oneWord2 = build_one_word_vector2(bitMap2)
+    print("oneword2",oneWord2)
+
+    if os.path.exists(kmeans_label_path):
+        print("kmeans label already exist")
+        labels = np.load(kmeans_label_path)
+    else:
+        start = time.time()
+        print("calculate kmeans")
+        kmeans = KMeans(n_clusters=clusterNum).fit(word_id_vector)
+        labels = kmeans.labels_
+        np.save(kmeans_label_path, labels)
+        end = time.time()
+        print("time for kmeans", end - start, 's')
+
+    print("labels")
+    with open(pathPrefix + str(clusterNum)+"_" + "labelsFrequence.txt", 'w') as f:
+        for i, l in enumerate(labels):
+            f.write(str(l) + " " + str(wordFrequency[i][1]) + "\n")
+    pca_path = pathPrefix + pcaPath
+    if os.path.exists(pca_path):
+        print("pca path already exist")
+        truncated_word_id_vector = np.load(pca_path)
+    else:
+        start = time.time()
+        print("calculate pca time")
+        pca = PCA(n_components=3)
+        truncated_word_id_vector = pca.fit_transform(word_id_vector)
+        end = time.time()
+        print("time for pca", end - start, 's')
+        np.save(pca_path, truncated_word_id_vector)
+
+    # draw
+    ax = plt.axes(projection='3d')
+    color = ['b', 'r', 'w', 'c', 'm', 'y', 'k', 'g'] * (clusterNum // 8 + 1)
+
+    words_map = [[] for _ in range(clusterNum)]
+    for i, l in enumerate(labels):
+        words_map[l].append(bitMap2[i])
+
+    count = []
+    for i,ws in enumerate(words_map):
+        count.append(len(ws))
+
+    for i,l in enumerate(labels):
+        if count[l] == 1:
+            key = list(w.keys())[i]
+            print(key,oneWord2[i])
+
+    total_arr = []
+    for i,ws in enumerate(words_map):
+        total = 0
+        print("length of words map",len(ws))
+        for w in ws:
+            total ^= w
+        total_arr.append(gmpy.popcount(total))
+
+    print("count of each cluster")
+    print(count)
+    print("max distance in each cluster")
+    dis_arr= calculated_max_distance_in_cluster(words_map)
+    print(dis_arr)
+    print("total in each cluster")
+    print(total_arr)
+    for i,[c,d,t] in enumerate(zip(count,dis_arr,total_arr)):
+        print("cluster",i,"count",c,"max distance",d,"total",t)
+    # draw
+    ws = [[] for _ in range(clusterNum)]
+    for i, l in enumerate(labels):
+        ws[l].append(truncated_word_id_vector[i])
+    for i, w in enumerate(ws):
+        c = color[i]
+        w = np.array(w)
+        print("length of different word", len(w), "shape of w", w.shape)
+        x = w[:, 0]
+        y = w[:, 1]
+        z = w[:, 2]
+        ax.scatter3D(x, y, z, c=c)
+    plt.show()
 
 
-def cal_reverse_index(word_list, file_corpus, save=True, reverse_index_path=reverseIndexPath):
-    if os.path.exists(reverse_index_path):
-        print("corpus already saved in file, skip doing again")
-        return load_npz(reverse_index_path)
-    row = []
-    col = []
-    data = []
-    for j, cp in enumerate(file_corpus):
-        cp = cp.split()
-        seen = set()
-        for c in cp:
-            if c in word_list and c not in seen:
-                i = word_list[c]
-                row.append(i)
-                col.append(j)
-                data.append(1)
-                seen.add(c)
-    res = csr_matrix((data, (row, col)), shape=(len(word_list), len(file_corpus)))
-    if save:
-        save_npz(reverse_index_path, res)
-    return res
+def calculated_max_distance_in_cluster(words_map):
+    dis_arr = [0]*len(words_map)
+    for i, ws in enumerate(words_map):
+        max_dis = -1
+        for j in range(len(ws) - 1):
+            for k in range(j + 1, len(ws)):
+                dis = j ^ k
+                if dis > max_dis:
+                    max_dis = dis
+        dis_arr[i] = max_dis
+    return dis_arr
 
 
-files = get_files(rootDir, True, targetFiles, fileTargetAmount)
-corpus = get_corpus(files, save=True, file_path=contentFile)
-dictionary = build_dictionary(corpus, save=True, file_path=dictionaryPath)
-bitMap = count_corpus(corpus, dictionary, save=True, vector_path=vectorPath)
-oneWord = build_one_word_vector(bitMap, save=True, one_word_path=oneWordPath)
-wordFrequency = [[w, c] for w, c in zip(dictionary, oneWord)]
-wordFrequency.sort(key=lambda x: x[1], reverse=True)
-w = {w[0]: i for i, w in enumerate(wordFrequency[:wordTargetAmount])}
-# print(wordFrequency)
-print("len of dictionary", len(dictionary))
-print("len of one word", len(oneWord))
-print("max frequency", max(oneWord))
-reverseIndex = cal_reverse_index(w, corpus, save=True, reverse_index_path=reverseIndexPath)
-print(reverseIndex)
+test_word_vector_cluster()
+# test_two_word()
+
+# for c in w:
+#     print(c)
+# print(w)
+
+
+# csr_matrix((data, (row, col)), shape=(len(word_list), len(file_corpus)))
