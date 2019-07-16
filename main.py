@@ -5,6 +5,7 @@ import random
 import util
 from scipy.sparse import csr_matrix
 import math
+from bisect import bisect_left
 
 
 def init_dataset(dataset_path, class_type, file_target_amount, path_prefix):
@@ -65,20 +66,40 @@ def process_dataset(path_prefix, true_dataset_percent, repeat_num=1):
                 cmap[count].append(i)
         return cmap
 
-    def one_level_cover_set(cmap, true_cmap):
-        cover_set = set()
+    def one_level_cover_pair(cmap, true_cmap):
+        cover_pair = []
 
         def random_pick(l):
             return l[random.randint(0, len(l) - 1)]
 
+        def least_distance_pick(c,true_cmap):
+            keys = list(true_cmap.keys())
+            i = bisect_left(keys,c)
+            if i == len(keys):
+                min_distance_c = keys[i-1]
+            elif i==0:
+                min_distance_c = keys[0]
+            else:
+                t1 = keys[i] - c
+                t2 = c - keys[i-1]
+                if t1 == t2:
+                    min_distance_c = [keys[i],keys[i-1]][random.randint(0,1)]
+                elif t1>t2:
+                    min_distance_c = keys[i-1]
+                else:
+                    min_distance_c = keys[i]
+            return min_distance_c
         for c in cmap.keys():
-            if len(cmap[c]) != 1 or c not in true_cmap:
+            if len(cmap[c]) != 1:
                 continue
             index = cmap[c][0]
-            true_index = random_pick(true_cmap[c])
-            if index == true_index:
-                cover_set.add(index)
-        return cover_set
+            if c in true_cmap:
+                true_index = random_pick(true_cmap[c])
+            else:
+                least_distance_count = least_distance_pick(true_cmap)
+                true_index = random_pick(c,true_cmap[least_distance_count])
+            cover_pair.append([index, true_index])
+        return cover_pair
 
     def bits_cosine_distance(a, b):
         x = gmpy.popcount(a & b)
@@ -90,11 +111,11 @@ def process_dataset(path_prefix, true_dataset_percent, repeat_num=1):
 
     @util.time_profiler
     @util.file_saver
-    def two_level_cover_set(cover_set, bitmap, true_bitmap, metric_func, **kwargs):
+    def two_level_cover_set(cover_pair, bitmap, true_bitmap, metric_func, **kwargs):
         m = len(cover_set)
         n = len(bitmap)
         result_set = set(cover_set)
-        for r in cover_set:
+        for [] in cover_set:
             cmap = dict()
             true_cmap = dict()
             for j in range(n):
@@ -110,7 +131,7 @@ def process_dataset(path_prefix, true_dataset_percent, repeat_num=1):
                     true_cmap[count].append(j)
                 else:
                     true_cmap[count] = [j]
-            result_set |= one_level_cover_set(cmap, true_cmap)
+            result_set |= one_level_cover_pair(cmap, true_cmap)
         return result_set
 
     def f(data_set):
@@ -123,11 +144,11 @@ def process_dataset(path_prefix, true_dataset_percent, repeat_num=1):
             true_bitmap = data_set.bitmap_from_wid(true_word_id_vector)
             cmap = count_map_from_bitmap(bitmap)
             true_cmap = count_map_from_bitmap(true_bitmap)
-            cover_set_layer_one = one_level_cover_set(cmap, true_cmap)
-            co_counts_cover_set = two_level_cover_set(cover_set_layer_one, bitmap, true_bitmap, co_counts)
+            cover_pair_layer_one = one_level_cover_pair(cmap, true_cmap)
+            co_counts_cover_set = two_level_cover_set(cover_pair_layer_one, bitmap, true_bitmap, co_counts)
             print("cocounts recover rate:", len(co_counts_cover_set) / len(bitmap))
             co_counts_recover_rate += len(co_counts_cover_set) / len(bitmap)
-            cosine_cover_set = two_level_cover_set(cover_set_layer_one, bitmap, true_bitmap, bits_cosine_distance)
+            cosine_cover_set = two_level_cover_set(cover_pair_layer_one, bitmap, true_bitmap, bits_cosine_distance)
             print("cosine recover rate:", len(cosine_cover_set) / len(bitmap))
             cosine_recover_rate += len(cosine_cover_set) / len(bitmap)
         print("cocounts recover average rate", co_counts_recover_rate / repeat_num)
