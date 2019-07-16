@@ -19,18 +19,23 @@ def init_dataset(dataset_path, class_type, file_target_amount, path_prefix):
     return f
 
 
-def sample_dataset(path_prefix):
+def sample_dataset(path_prefix, sample_strategy="topk"):
     def f(data_set):
         bitmap = data_set.build_bitmap(save=True, saving_path=path_prefix + "temp_bitmap.data")
         one_word = data_set.build_one_word_vector(bitmap)
-        top_k_words = data_set.sample_top_k_words(one_word, k=wordTargetAmount)
-        dic = {w: i for i, w in enumerate(top_k_words)}
+        if sample_strategy == "topk":
+            sampled_words = data_set.sample_top_k_words(one_word, k=wordTargetAmount)
+        elif sample_strategy == "random":
+            sampled_words = data_set.random_sample_words(one_word, k=wordTargetAmount)
+        else:
+            raise Exception("wrong sample strategy")
+        dic = {w: i for i, w in enumerate(sampled_words)}
         return type(data_set)(data_set.cps, dic)
 
     return f
 
 
-def process_dataset(path_prefix, true_dataset_percent):
+def process_dataset(path_prefix, true_dataset_percent, repeat_num=1):
     @util.time_profiler
     @util.file_saver
     def permute_dataset(matrix, **kwargs):
@@ -111,34 +116,41 @@ def process_dataset(path_prefix, true_dataset_percent):
     def f(data_set):
         bitmap = data_set.build_bitmap(save=True, saving_path=path_prefix + "_bitmap.data")
         word_id_vector = data_set.build_word_id_vector(save=True, saving_path=path_prefix + "_wid.npz")
-        true_word_id_vector = permute_dataset(word_id_vector, save=True, saving_path=path_prefix + "_true_wid.npz")
-        true_bitmap = data_set.bitmap_from_wid(true_word_id_vector, save=True,
-                                               saving_path=path_prefix + "_true_bitmap.data")
-        cmap = count_map_from_bitmap(bitmap)
-        true_cmap = count_map_from_bitmap(true_bitmap)
-        cover_set_layer_one = one_level_cover_set(cmap, true_cmap)
-        co_counts_cover_set = two_level_cover_set(cover_set_layer_one, bitmap, true_bitmap, co_counts, save=True,
-                                                  saving_path=path_prefix + "_co_counts_cover_set.data")
-        print("cocounts recover rate:", len(co_counts_cover_set) / len(bitmap))
-        cosine_cover_set = two_level_cover_set(cover_set_layer_one, bitmap, true_bitmap, bits_cosine_distance,
-                                               save=True, saving_path=path_prefix + "_cosine_cover_set.data")
-        print("cosine recover rate:", len(cosine_cover_set) / len(bitmap))
+        co_counts_recover_rate = 0
+        cosine_recover_rate = 0
+        for i in range(repeat_num):
+            true_word_id_vector = permute_dataset(word_id_vector)
+            true_bitmap = data_set.bitmap_from_wid(true_word_id_vector)
+            cmap = count_map_from_bitmap(bitmap)
+            true_cmap = count_map_from_bitmap(true_bitmap)
+            cover_set_layer_one = one_level_cover_set(cmap, true_cmap)
+            co_counts_cover_set = two_level_cover_set(cover_set_layer_one, bitmap, true_bitmap, co_counts)
+            print("cocounts recover rate:", len(co_counts_cover_set) / len(bitmap))
+            co_counts_recover_rate += len(co_counts_cover_set) / len(bitmap)
+            cosine_cover_set = two_level_cover_set(cover_set_layer_one, bitmap, true_bitmap, bits_cosine_distance)
+            print("cosine recover rate:", len(cosine_cover_set) / len(bitmap))
+            cosine_recover_rate += len(cosine_cover_set) / len(bitmap)
+        print("cocounts recover average rate", co_counts_recover_rate / repeat_num)
+        print("cosine recover average rate", cosine_recover_rate / repeat_num)
 
     return f
 
 
-wordTargetAmount = 20000
-fileTargetAmount = 100000
+fileTargetAmount = 10000
 
 test_true_dataset_percent = [0.5, 0.6, 0.7, 0.8, 0.9, 1][::-1]
+word_target_amount = range(500,2501,500)
 
-for trueDatasetPercent in test_true_dataset_percent:
-    print("true data set percent", str(trueDatasetPercent * 100)+"%")
-    enron_file_prefix = "./cache/" + EnronDataSet.__name__ + "_" + str(fileTargetAmount) + "_"
-    EnronDataSet.process(init_data_set=init_dataset("maildir", EnronDataSet, fileTargetAmount,
-                                                    enron_file_prefix),
-                         sample_data_set=sample_dataset(enron_file_prefix + str(wordTargetAmount) + "_"),
-                         process_data_set=process_dataset(
-                             enron_file_prefix + str(wordTargetAmount) + "_" + str(trueDatasetPercent * 100) + "_",
-                             trueDatasetPercent)
-                         )
+for wordTargetAmount in word_target_amount:
+    print("word target amount", wordTargetAmount)
+    for trueDatasetPercent in test_true_dataset_percent:
+        print("true data set percent", str(trueDatasetPercent * 100) + "%")
+        enron_file_prefix = "./cache/" + EnronDataSet.__name__ + "_" + str(fileTargetAmount) + "_"
+        EnronDataSet.process(init_data_set=init_dataset("maildir", EnronDataSet, fileTargetAmount,
+                                                        enron_file_prefix),
+                             sample_data_set=sample_dataset(enron_file_prefix + str(wordTargetAmount) + "_",
+                                                            sample_strategy="random"),
+                             process_data_set=process_dataset(
+                                 enron_file_prefix + str(wordTargetAmount) + "_" + str(trueDatasetPercent * 100) + "_",
+                                 trueDatasetPercent, repeat_num=5)
+                             )

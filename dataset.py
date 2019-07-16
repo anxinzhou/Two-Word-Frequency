@@ -6,6 +6,7 @@ import time
 import os
 from scipy.sparse import csr_matrix
 import re
+import random
 
 
 class DataSet(ABC):
@@ -102,12 +103,24 @@ class DataSet(ABC):
             one_word[i] = gmpy.popcount(bitmap[i])
         return one_word
 
-    def sample_top_k_words(self, one_word, k, filter_count=200):
+    def sample_top_k_words(self, one_word, k, head_filter_count=200):
         dic = self.dic
         words = dic.keys()
         m = [[w, c] for w, c in zip(words, one_word)]
         m.sort(key=lambda x: x[1], reverse=True)
-        return [b[0] for b in m[filter_count:filter_count + k]]
+        return [b[0] for b in m[head_filter_count:head_filter_count + k]]
+
+    def random_sample_words(self,one_word, k, head_filter_count=200):
+        dic = self.dic
+        words = dic.keys()
+        tail_filter_count = len(dic)*0.1
+        m = [[w, c] for w, c in zip(words, one_word)]
+        m.sort(key=lambda x: x[1], reverse=True)
+        m = m[head_filter_count:int(len(dic)-tail_filter_count)]
+        keep_list = random.sample(range(len(m)),k)
+        res = [m[i][0] for i in keep_list]
+        return res
+
 
     @staticmethod
     def build_two_word_vector(bitmap, **kwargs):
