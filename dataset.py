@@ -76,6 +76,23 @@ class DataSet(ABC):
             bitmap[row[i]] += addition
         return bitmap
 
+    @staticmethod
+    @util.time_profiler
+    @util.file_saver
+    def bitmap_from_dense_wid(wid, **kwargs):
+        bitmap = [0] * wid.shape[0]
+        row = len(wid)
+        col = len(wid[0])
+        for i in range(row):
+            for j in range(col):
+                if wid[i][j] == 1:
+                    if j == 0:
+                        addition = 1
+                    else:
+                        addition = 2 << (j - 1)
+                    bitmap[i] += addition
+        return bitmap
+
     @util.time_profiler
     @util.file_saver
     def build_word_id_vector(self, **kwargs):
@@ -103,27 +120,52 @@ class DataSet(ABC):
             one_word[i] = gmpy.popcount(bitmap[i])
         return one_word
 
-    def sample_top_k_words(self, one_word, k, head_filter_count=200):
+    def sample_top_k_words(self, one_word, k, head_filter_count=0):
         dic = self.dic
         words = dic.keys()
         m = [[w, c] for w, c in zip(words, one_word)]
         m.sort(key=lambda x: x[1], reverse=True)
         return [b[0] for b in m[head_filter_count:head_filter_count + k]]
 
-    def random_sample_words(self,one_word, k, head_filter_count=200):
+    def random_sample_words(self, one_word, k, head_filter_count=0):
         dic = self.dic
         words = dic.keys()
-        tail_filter_count = len(dic)*0.1
         m = [[w, c] for w, c in zip(words, one_word)]
+        keep_set = set(random.sample(range(len(m)), k))
+        m = [e for i, e in enumerate(m) if i in keep_set]
         m.sort(key=lambda x: x[1], reverse=True)
-        m = m[head_filter_count:int(len(dic)-tail_filter_count)]
-        keep_list = random.sample(range(len(m)),k)
-        res = [m[i][0] for i in keep_list]
+        res = [e[0] for e in m]
         return res
 
+    def deunique_random_sample_words(self, one_word, k):
+        dic = self.dic
+        words = dic.keys()
+        # tail_filter_count = len(dic)*0.1
+
+        m = [[w, c] for w, c in zip(words, one_word)]
+        sample_count = k + int(k * 0.3)
+        sample_count = min(sample_count, len(m))
+        keep_list = random.sample(range(len(m)), sample_count)
+        keep_set = set(keep_list)
+
+        cmap = dict()
+        for i, c in enumerate(one_word):
+            if i not in keep_set:
+                continue
+            if c in cmap:
+                cmap[c].append(i)
+            else:
+                cmap[c] = [i]
+        unique_set = set()
+        for c in cmap:
+            if len(cmap[c]) == 1:
+                unique_set.add(cmap[c][0])
+        return [m[i][0] for i in range(len(m)) if i in keep_set and i not in unique_set][:k]
 
     @staticmethod
-    def build_two_word_vector(bitmap, **kwargs):
+    @util.time_profiler
+    @util.file_saver
+    def build_two_word_vector_by_bitmap(bitmap, **kwargs):
         cur_number = 0
         skip_count = 0
         length = len(bitmap)
@@ -139,6 +181,12 @@ class DataSet(ABC):
                     two_word[i][j] = count
                     cur_number += 1
         return two_word
+
+    @staticmethod
+    @util.time_profiler
+    @util.file_saver
+    def build_two_word_vector_by_wid(wid, **kwargs):
+        return np.dot(wid, np.transpose(wid))
 
     @classmethod
     def files_from_dir(cls, path, target_amount):
@@ -276,15 +324,42 @@ class EnronDataSet(DataSet):
         return not file.endswith(".")
 
 
-class ApacheDataSet(DataSet):
+class IMDBDataSet(DataSet):
     def __init__(self, cps, dic):
         super().__init__(cps, dic)
 
+    @classmethod
     def file_parser(cls, file):
-        pass
+        with open(file, 'r') as f:
+            c = []
+            try:
+                lines = f.readlines()
+                for line in lines:
+                    line = re.sub(r"[^\s]*@[^\s]*", " ", line)
+                    line = re.sub(r"[^A-Za-z]", " ", line).lower()
+                    # remove duplicate words
+                    seen = set()
+                    tmp = line.split()
+                    line = []
+                    for l in tmp:
+                        if len(l) >= 2 and l not in cls.stopWords and l not in seen:
+                            seen.add(l)
+                            line.append(l)
+                    line = ' '.join(line)
+                    if len(line) != 0:
+                        c.append(line)
+                        # print(line)
+            except UnicodeDecodeError:
+                print(file)
+                return ''
+            # c_lists = content.split()
+            # content = ' '.join([c for c in c_lists if enDict.check(c)]) # check if is a word
+        return ' '.join(c)
 
+    @classmethod
     def dir_filter(cls, file):
-        pass
+        return file.startswith(".")
 
+    @classmethod
     def file_filter(cls, file):
-        pass
+        return not file.endswith(".txt")

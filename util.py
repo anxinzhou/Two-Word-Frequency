@@ -62,7 +62,7 @@ def file_saver(func):
         return np.load(path)
 
     def save_content_numpy(content, path):
-        return np.save(content, path)
+        return np.save(path,content)
 
     def load_content_sparse_matrix(path):
         return load_npz(path)
@@ -94,5 +94,5 @@ def file_saver(func):
 @time_profiler
 @file_saver
 def cal_eg(arr):
-    w, _ = LA.eig(arr)
+    w, _ = LA.eigh(arr)
     return w
