@@ -222,16 +222,16 @@ def attack_evaluation():
         @util.file_saver
         def permute_dataset(matrix, true_dataset_percent, **kwargs):
             matrix = matrix.tocoo()
-            len_row = matrix.shape[0]
-            keep_set = set(random.sample(range(len_row), int(len_row * true_dataset_percent)))
+            len_col = matrix.shape[1]
+            keep_set = set(random.sample(range(len_col), int(len_col * true_dataset_percent)))
             data = matrix.data
             row = matrix.row
             col = matrix.col
             new_data = []
             new_row = []
             new_col = []
-            for i in range(len(data)):
-                if row[i] in keep_set:
+            for i in range(len_col):
+                if col[i] in keep_set:
                     new_data.append(data[i])
                     new_row.append(row[i])
                     new_col.append(col[i])
@@ -248,6 +248,10 @@ def attack_evaluation():
                 else:
                     cmap[count].append(i)
             return cmap
+
+        @util.time_profiler
+        def partial_count_attack(bitmap, cmap):
+
 
         @util.time_profiler
         def find_unique_count_count_attack(bitmap, cmap):
@@ -561,46 +565,61 @@ def attack_evaluation():
             result_set = two_level_cover_set_cocounts(unique_pair, bitmap, bitmap)
             print("cosine attack recover rate", len(result_set) / len(bitmap))
 
-        return padding_nonunique_recover_rate
-
         def get_wid(data_set):
+            bitmap = data_set.build_bitmap()
+            one_word = data_set.build_one_word_vector(bitmap)
+            tmp = [[i, c] for i, c in enumerate(one_word)]
+            tmp = sorted(tmp, key=lambda x: x[1], reverse=True)
+            tmp = [k[0] for k in tmp]
             wid = data_set.build_word_id_vector().toarray()
-            f = open('wid.txt', 'w')
-            for c in wid:
-                f.write(' '.join([str(e) for e in c]) + "\n")
-            f.close()
+            result = []
+            for index in tmp:
+                result.append(wid[index])
+            result = np.array(result)
+            print("shape of result")
+            print(result.shape)
+            np.save("wid.npy", result)
 
-        return get_wid
+        def percent_attack(data_set):
+            wid_before = data_set.build_word_id_vector()
+            wid = permute_dataset(data_set, wid_before)
+            bitmap = data_set.bitmap_from_wid(wid)
+            cmap = count_map_from_bitmap(bitmap)
+            recover_set = partial_count_attack(bitmap, cmap)
+            print("recover rate", len(recover_set) / len(bitmap))
+            # def permute_dataset(matrix, true_dataset_percent, **kwargs):
 
-    fileTargetAmount = 50000
+        return percent_attack
 
-    word_target_amount = [1000]
+    fileTargetAmount = 20000
 
-    for wordTargetAmount in word_target_amount:
-        print(EnronDataSet.__name__, "begin test")
-        print("word target amount", wordTargetAmount)
-        enron_file_prefix = "./cache/" + EnronDataSet.__name__ + "_" + str(fileTargetAmount) + "_"
-        EnronDataSet.process(init_data_set=init_dataset("maildir", EnronDataSet, fileTargetAmount,
-                                                        enron_file_prefix),
-                             sample_data_set=sample_dataset(enron_file_prefix + str(wordTargetAmount) + "_"
-                                                            , wordTargetAmount, sample_strategy="random"),
-                             process_data_set=process_dataset(
-                                 enron_file_prefix + str(wordTargetAmount) + "_",
-                                 keep_percent=1, repeat_num=1)
-                             )
+    word_target_amount = range(3000, 15001, 3000)
 
     # for wordTargetAmount in word_target_amount:
-    #     print(IMDBDataSet.__name__, "begin test")
+    #     print(EnronDataSet.__name__, "begin test")
     #     print("word target amount", wordTargetAmount)
-    #     imdb_file_prefix = "./cache/" + IMDBDataSet.__name__ + "_" + str(fileTargetAmount) + "_"
-    #     IMDBDataSet.process(init_data_set=init_dataset("imdb", IMDBDataSet, fileTargetAmount,
-    #                                                    imdb_file_prefix),
-    #                         sample_data_set=sample_dataset(imdb_file_prefix + str(wordTargetAmount) + "_",
-    #                                                        wordTargetAmount, sample_strategy="random"),
-    #                         process_data_set=process_dataset(
-    #                             imdb_file_prefix + str(wordTargetAmount) + "_",
-    #                             keep_percent=1, repeat_num=1)
-    #                         )
+    #     enron_file_prefix = "./cache/" + EnronDataSet.__name__ + "_" + str(fileTargetAmount) + "_"
+    #     EnronDataSet.process(init_data_set=init_dataset("maildir", EnronDataSet, fileTargetAmount,
+    #                                                     enron_file_prefix),
+    #                          sample_data_set=sample_dataset(enron_file_prefix + str(wordTargetAmount) + "_"
+    #                                                         , wordTargetAmount, sample_strategy="topk"),
+    #                          process_data_set=process_dataset(
+    #                              enron_file_prefix + str(wordTargetAmount) + "_",
+    #                              keep_percent=1, repeat_num=1)
+    #                          )
+
+    for wordTargetAmount in word_target_amount:
+        print(IMDBDataSet.__name__, "begin test")
+        print("word target amount", wordTargetAmount)
+        imdb_file_prefix = "./cache/" + IMDBDataSet.__name__ + "_" + str(fileTargetAmount) + "_"
+        IMDBDataSet.process(init_data_set=init_dataset("imdb", IMDBDataSet, fileTargetAmount,
+                                                       imdb_file_prefix),
+                            sample_data_set=sample_dataset(imdb_file_prefix + str(wordTargetAmount) + "_",
+                                                           wordTargetAmount, sample_strategy="topk"),
+                            process_data_set=process_dataset(
+                                imdb_file_prefix + str(wordTargetAmount) + "_",
+                                keep_percent=1, repeat_num=1)
+                            )
     # to cal cocounts
     # def f(data_set):
     #     bitmap = data_set.build_bitmap()
