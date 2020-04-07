@@ -70,7 +70,7 @@ def co_counts(a, b):
 
 # unique_by  'cosine' or 'count'
 #
-def recover_by_cocounts(bitmap, true_bitmap, unique_by='cosine',early_stop=False):
+def recover_by_cocounts(bitmap, true_bitmap, unique_by='cosine', early_stop=False):
     cmap = count_map_from_bitmap(bitmap)
     true_cmap = count_map_from_bitmap(true_bitmap)
     if unique_by == 'cosine':
@@ -85,7 +85,7 @@ def recover_by_cocounts(bitmap, true_bitmap, unique_by='cosine',early_stop=False
             count += 1
     # print("length of cover pair", len(cover_pair))
     # print("covered by unique count", count)
-    return two_level_cover_set_cocounts(cover_pair, bitmap, true_bitmap,early_stop)
+    return two_level_cover_set_cocounts(cover_pair, bitmap, true_bitmap, early_stop)
 
 
 def find_unique_count_count(cmap, true_cmap):
@@ -152,7 +152,7 @@ def find_unique_count_cosine(bitmap, cmap):
     return unique_pair
 
 
-def two_level_cover_set_cocounts(cover_pair, bitmap, true_bitmap, early_stop=False,**kwargs):
+def two_level_cover_set_cocounts(cover_pair, bitmap, true_bitmap, early_stop=False, **kwargs):
     cmap = count_map_from_bitmap(bitmap)
     true_cmap = count_map_from_bitmap(true_bitmap)
     n = len(bitmap)
@@ -219,7 +219,7 @@ def two_level_cover_set_cocounts(cover_pair, bitmap, true_bitmap, early_stop=Fal
     return res
 
 
-def random_sample_words(dic, one_word, count, strategy = "random",head_filter_count=200):
+def random_sample_words(dic, one_word, count, strategy="random", head_filter_count=200):
     words = dic.keys()
     m = [[w, c] for w, c in zip(words, one_word)]
     m.sort(key=lambda x: x[1], reverse=True)
@@ -331,10 +331,180 @@ def build_word_id_vector(cps, dic):
                 seen.add(c)
     return wid
 
-def attack_parital_db(bitmap, drop_rate):
-    open_index = random.sample(range(len(bitmap)),len(bitmap)*(1-drop_rate))
-    encrypted_index = range(len(bitmap))
+
+def attack_paritial_db_2(bitmap, drop_rate):
+    open_index = list(random.sample(range(len(bitmap)), int(len(bitmap) * (1 - drop_rate))))
+    encrypted_index = list(range(len(bitmap)))
+    random.shuffle(open_index)
+    random.shuffle(encrypted_index)
+    # find unique
+    open_count_map = {}
+    for i in open_index:
+        c = gmpy.popcount(bitmap[i])
+        if c == 0:
+            continue
+        if c not in open_count_map:
+            open_count_map[c] = [i]
+        else:
+            open_count_map[c].append(i)
+
+    encrypted_count_map = {}
+    for i in encrypted_index:
+        c = gmpy.popcount(bitmap[i])
+        if c == 0:
+            continue
+        if c not in encrypted_count_map:
+            encrypted_count_map[c] = [i]
+        else:
+            encrypted_count_map[c].append(i)
+
+    base_line_pair = []
+    for c in open_count_map:
+        if c not in encrypted_count_map:
+            continue
+        if len(open_count_map[c]) != 1 or len(encrypted_count_map[c]) != 1:
+            continue
+        base_line_pair.append([open_count_map[c][0], encrypted_count_map[c][0]])
+    # print(open_count_map)
+    # print(base_line_pair)
+    ovisited = set()
+    evisited = set()
+    for p in base_line_pair:
+        ovisited.add(p[0])
+        evisited.add(p[1])
+    while True:
+        match_pair = []
+        for pair in base_line_pair:
+            w = pair[0]
+            q = pair[1]
+            oi_count_map = {}
+            for oi in open_index:
+                if oi in ovisited:
+                    continue
+                c = gmpy.popcount(bitmap[w] & bitmap[oi])
+                if c == 0:
+                    continue
+                if c not in oi_count_map:
+                    oi_count_map[c] = [oi]
+                else:
+                    oi_count_map[c].append(oi)
+            ei_count_map = {}
+            for ei in encrypted_index:
+                if ei in evisited:
+                    continue
+                c = gmpy.popcount(bitmap[q] & bitmap[ei])
+                if c == 0:
+                    continue
+                if c not in ei_count_map:
+                    ei_count_map[c] = [ei]
+                else:
+                    ei_count_map[c].append(ei)
+            for c in oi_count_map:
+                if c not in ei_count_map:
+                    continue
+                if len(oi_count_map[c]) != 1 or len(ei_count_map[c]) != 1:
+                    continue
+                oindex = oi_count_map[c][0]
+                eindex = ei_count_map[c][0]
+                ovisited.add(oindex)
+                evisited.add(eindex)
+                match_pair.append([oindex, eindex])
+        if len(match_pair) == 0:
+            break
+        base_line_pair.extend(match_pair)
+    return base_line_pair
 
 
+def attack_paritial_db(bitmap, drop_rate):
+    open_index = list(random.sample(range(len(bitmap)), int(len(bitmap) * (1 - drop_rate))))
+    encrypted_index = list(range(len(bitmap)))
+    random.shuffle(open_index)
+    random.shuffle(encrypted_index)
+    # find unique
+    open_count_map = {}
+    for i in open_index:
+        c = gmpy.popcount(bitmap[i])
+        if c == 0:
+            continue
+        if c not in open_count_map:
+            open_count_map[c] = [i]
+        else:
+            open_count_map[c].append(i)
 
+    encrypted_count_map = {}
+    for i in encrypted_index:
+        c = gmpy.popcount(bitmap[i])
+        if c == 0:
+            continue
+        if c not in encrypted_count_map:
+            encrypted_count_map[c] = [i]
+        else:
+            encrypted_count_map[c].append(i)
 
+    base_line_pair = []
+    for c in open_count_map:
+        if c not in encrypted_count_map:
+            continue
+        if len(open_count_map[c]) != 1 or len(encrypted_count_map[c]) != 1:
+            continue
+        base_line_pair.append([open_count_map[c][0], encrypted_count_map[c][0]])
+    # print(open_count_map)
+    # print(base_line_pair)
+    ovisited = set()
+    evisited = set()
+    for p in base_line_pair:
+        ovisited.add(p[0])
+        evisited.add(p[1])
+    while True:
+        match_pair = []
+        ocount_map = {}
+        for oi in open_index:
+            if oi in ovisited:
+                continue
+            # all_zero = True
+            count = []
+            for [p, q] in base_line_pair:
+                c = co_counts(bitmap[p], bitmap[oi])
+                count.append(c)
+                # if c != 0:
+                #     all_zero = False
+            # if all_zero:
+            #     continue
+            cstr = hash('#'.join([str(ele) for ele in count]))
+            if cstr not in ocount_map:
+                ocount_map[cstr] = [oi]
+            else:
+                ocount_map[cstr].append(oi)
+        ecount_map = {}
+        for ei in encrypted_index:
+            if ei in evisited:
+                continue
+            # all_zero = True
+            count = []
+            for [p, q] in base_line_pair:
+                c = co_counts(bitmap[q], bitmap[ei])
+                count.append(c)
+            #     if c != 0:
+            #         all_zero = False
+            # if all_zero:
+            #     continue
+            cstr = hash('#'.join([str(ele) for ele in count]))
+            if cstr not in ecount_map:
+                ecount_map[cstr] = [ei]
+            else:
+                ecount_map[cstr].append(ei)
+        for c in ocount_map:
+            if c not in ecount_map:
+                continue
+            if len(ocount_map[c]) != 1 or len(ecount_map[c]) != 1:
+                continue
+            oindex = ocount_map[c][0]
+            eindex = ecount_map[c][0]
+            ovisited.add(oindex)
+            evisited.add(eindex)
+            match_pair.append([oindex, eindex])
+        if len(match_pair) == 0:
+            break
+        base_line_pair.extend(match_pair)
+
+    return base_line_pair
