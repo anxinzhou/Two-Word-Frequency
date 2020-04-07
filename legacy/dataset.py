@@ -162,6 +162,31 @@ class DataSet(ABC):
                 unique_set.add(cmap[c][0])
         return [m[i][0] for i in range(len(m)) if i in keep_set and i not in unique_set][:k]
 
+    def deunique_sample_topk_words(self, one_word, k):
+        dic = self.dic
+        words = dic.keys()
+        # tail_filter_count = len(dic)*0.1
+
+        m = [[w, c] for w, c in zip(words, one_word)]
+        m.sort(key=lambda x: x[1], reverse=True)
+
+
+        sample_count = k + int(k * 0.3)
+        sample_count = min(sample_count, len(m))
+        m = m[:sample_count]
+
+        cmap = dict()
+        for i, c in enumerate(one_word[:sample_count]):
+            if c in cmap:
+                cmap[c].append(i)
+            else:
+                cmap[c] = [i]
+        unique_set = set()
+        for c in cmap:
+            if len(cmap[c]) == 1:
+                unique_set.add(cmap[c][0])
+        return [m[i][0] for i in range(len(m)) if i not in unique_set][:k]
+
     @staticmethod
     @util.time_profiler
     @util.file_saver

@@ -11,7 +11,6 @@ from bisect import bisect_left
 import sys
 from queue import PriorityQueue as PQ
 
-
 def bits_cosine_distance(a, b):
     x = gmpy.popcount(a & b)
     if x == 0:
@@ -30,13 +29,12 @@ def init_dataset(dataset_path, class_type, file_target_amount, path_prefix):
                                              saving_path=path_prefix + "cps.data")
         print("length of file", len(cps))
         dic = class_type.build_dictionary(cps, save=True, saving_path=path_prefix + "dic.data")
-        print("total words:", len(dic))
+        print("total words in dataset:", len(dic))
         return class_type(cps, dic)
 
     return f
 
-
-def sample_dataset(path_prefix, word_target_amount, sample_strategy="deunique"):
+def sample_dataset(path_prefix, word_target_amount, sample_strategy):
     def f(data_set):
         bitmap = data_set.build_bitmap(save=True, saving_path=path_prefix + "temp_bitmap.data")
         one_word = data_set.build_one_word_vector(bitmap)
@@ -48,8 +46,10 @@ def sample_dataset(path_prefix, word_target_amount, sample_strategy="deunique"):
             raise Exception("not support")
         elif sample_strategy == "full":
             sampled_words = data_set.random_sample_words(one_word, k=len(bitmap))
-        elif sample_strategy == "deunique":
+        elif sample_strategy == "deunique_random":
             sampled_words = data_set.deunique_random_sample_words(one_word, k=word_target_amount)
+        elif sample_strategy == "deunique_topk":
+            sampled_words = data_set.deunique_sample_topk_words(one_word, k=word_target_amount)
         else:
             raise Exception("wrong sample strategy")
         dic = {w: i for i, w in enumerate(sampled_words)}
@@ -140,12 +140,19 @@ def static_evaluation():
 
 
 def attack_evaluation():
-    def process_dataset(path_prefix, keep_percent, repeat_num=1):
+    def process_dataset(path_prefix, keep_percent, repeat_num=1, windowSize=10):
         @util.time_profiler
         def recover_by_cocounts(data_set, bitmap, true_bitmap):
             cmap = count_map_from_bitmap(bitmap)
             true_cmap = count_map_from_bitmap(true_bitmap)
-            return two_level_cover_set_cocounts(one_level_cover_pair_cocounts(cmap, true_cmap), bitmap, true_bitmap)
+            cover_pair = one_level_cover_pair_cocounts(cmap, true_cmap)
+            count = 0
+            for p in cover_pair:
+                if p[0] == p[1]:
+                    count += 1
+            print("length of cover pair", len(cover_pair))
+            print("covered by unique count", count)
+            return two_level_cover_set_cocounts(cover_pair, bitmap, true_bitmap)
 
         @util.time_profiler
         def one_level_cover_pair_cocounts(cmap, true_cmap):
@@ -175,12 +182,17 @@ def attack_evaluation():
                     if j in cover_set:
                         continue
                     co_similarity[j] = []
-                    true_co_similarity[j] = []
                     for [index, true_index] in result_pair:
                         count = co_counts(bitmap[index], bitmap[j])
-                        true_count = co_counts(true_bitmap[true_index], true_bitmap[j])
                         co_similarity[j].append(count)
+                for j in range(n):
+                    if j in visited:
+                        continue
+                    true_co_similarity[j] = []
+                    for [index, true_index] in result_pair:
+                        true_count = co_counts(true_bitmap[true_index], true_bitmap[j])
                         true_co_similarity[j].append(true_count)
+
                 for c in cmap:
                     if c not in true_cmap:
                         continue
@@ -222,16 +234,16 @@ def attack_evaluation():
         @util.file_saver
         def permute_dataset(matrix, true_dataset_percent, **kwargs):
             matrix = matrix.tocoo()
-            len_col = matrix.shape[1]
-            keep_set = set(random.sample(range(len_col), int(len_col * true_dataset_percent)))
+            len_row = matrix.shape[0]
+            keep_set = set(random.sample(range(len_row), int(len_row * true_dataset_percent)))
             data = matrix.data
             row = matrix.row
             col = matrix.col
             new_data = []
             new_row = []
             new_col = []
-            for i in range(len_col):
-                if col[i] in keep_set:
+            for i in range(len(row)):
+                if row[i] in keep_set:
                     new_data.append(data[i])
                     new_row.append(row[i])
                     new_col.append(col[i])
@@ -248,10 +260,6 @@ def attack_evaluation():
                 else:
                     cmap[count].append(i)
             return cmap
-
-        @util.time_profiler
-        def partial_count_attack(bitmap, cmap):
-
 
         @util.time_profiler
         def find_unique_count_count_attack(bitmap, cmap):
@@ -462,9 +470,9 @@ def attack_evaluation():
             bitmap = data_set.build_bitmap()
             print("word number:", len(bitmap))
             cmap = count_map_from_bitmap(bitmap)
-            unique_pair = find_unique_count_count_attack(bitmap, cmap)
-            result_set = two_level_cover_set_cocounts(unique_pair, bitmap, bitmap)
-            print("count attack recover rate", len(result_set) / len(bitmap))
+            # unique_pair = find_unique_count_count_attack(bitmap, cmap)
+            # result_set = two_level_cover_set_cocounts(unique_pair, bitmap, bitmap)
+            # print("count attack recover rate", len(result_set) / len(bitmap))
             unique_pair = find_unique_count_cosine(bitmap, cmap)
             result_set = two_level_cover_set_cocounts(unique_pair, bitmap, bitmap)
             print("cosine attack recover rate", len(result_set) / len(bitmap))
@@ -575,51 +583,108 @@ def attack_evaluation():
             result = []
             for index in tmp:
                 result.append(wid[index])
-            result = np.array(result)
-            print("shape of result")
-            print(result.shape)
-            np.save("wid.npy", result)
+            with open('wid.txt','w') as f:
+                for w in result:
+                    f.write(' '.join([str(k) for k in w]))
+                    f.write('\n')
+            print(len(result))
+            print(len(result[0]))
+        return get_wid
 
         def percent_attack(data_set):
-            wid_before = data_set.build_word_id_vector()
-            wid = permute_dataset(data_set, wid_before)
-            bitmap = data_set.bitmap_from_wid(wid)
-            cmap = count_map_from_bitmap(bitmap)
-            recover_set = partial_count_attack(bitmap, cmap)
-            print("recover rate", len(recover_set) / len(bitmap))
-            # def permute_dataset(matrix, true_dataset_percent, **kwargs):
+            cipher_wid = data_set.build_word_id_vector()
+            plain_wid = permute_dataset(cipher_wid, keep_percent)
+            cipher_bitmap = data_set.bitmap_from_wid(cipher_wid)
+            plain_bitmap = data_set.bitmap_from_wid(plain_wid)
+            co_counts_cover_set = recover_by_cocounts(data_set, cipher_bitmap, plain_bitmap)
+            print("cocounts recover rate:", len(co_counts_cover_set) / len(cipher_bitmap))
 
-        return percent_attack
+        def col_attack(data_set):
+            def pair_binary_search(arr, t):
+                lo = 0
+                hi = len(arr)
+                while lo < hi:
+                    mid = lo + (hi - lo) // 2
+                    if arr[mid][1] < t:
+                        lo = mid + 1
+                    else:
+                        hi = mid
+                return lo
 
-    fileTargetAmount = 20000
+            def get_unique(cipher_bitmap, plain_bitmap, target_amount):
+                if target_amount == 0 or not target_amount:
+                    exit(1)
+                cipher_one_word = data_set.build_one_word_vector(cipher_bitmap)
+                plain_one_word = data_set.build_one_word_vector(plain_bitmap)
+                cipher_pair = [(i, c) for i, c in enumerate(cipher_one_word)]
+                cipher_pair.sort(key=lambda x: x[1], reverse=True)
+                plain_pair = [(i, c) for i, c in enumerate(plain_one_word)]
+                plain_pair.sort(key=lambda x: x[1], reverse=True)
+                recover_pair = []
+                for cp in cipher_pair:
+                    plain_index = pair_binary_search(plain_pair, cp[1])
+                    seg = target_amount // 2
+                    lo = max(plain_index - seg, 0)
+                    hi = min(plain_index + seg, len(plain_pair))
+                    upper_remain = seg - (hi - plain_index)
+                    lo = max(lo - upper_remain, 0)
+                    bottom_remain = seg - (plain_index - lo)
+                    hi = min(hi + bottom_remain, len(plain_pair))
+                    pick_index = random.randint(lo, hi - 1)
+                    recover_pair.append([plain_index, pick_index])
+                    plain_pair = plain_pair[:pick_index] + plain_pair[pick_index + 1:]
+                result_count = 0
+                for p in recover_pair:
+                    if p[0] == p[1]:
+                        result_count += 1
+                return result_count
 
-    word_target_amount = range(3000, 15001, 3000)
+            cipher_wid = data_set.build_word_id_vector()
+            plain_wid = permute_dataset(cipher_wid, keep_percent)
+            plain_bitmap = data_set.bitmap_from_wid(plain_wid)
+            cipher_bitmap = data_set.bitmap_from_wid(cipher_wid)
+            result_count = get_unique(cipher_bitmap, plain_bitmap, windowSize)
+            print("recover rate:", result_count / len(plain_bitmap))
 
-    # for wordTargetAmount in word_target_amount:
-    #     print(EnronDataSet.__name__, "begin test")
-    #     print("word target amount", wordTargetAmount)
-    #     enron_file_prefix = "./cache/" + EnronDataSet.__name__ + "_" + str(fileTargetAmount) + "_"
-    #     EnronDataSet.process(init_data_set=init_dataset("maildir", EnronDataSet, fileTargetAmount,
-    #                                                     enron_file_prefix),
-    #                          sample_data_set=sample_dataset(enron_file_prefix + str(wordTargetAmount) + "_"
-    #                                                         , wordTargetAmount, sample_strategy="topk"),
-    #                          process_data_set=process_dataset(
-    #                              enron_file_prefix + str(wordTargetAmount) + "_",
-    #                              keep_percent=1, repeat_num=1)
-    #                          )
+        return col_attack
 
-    for wordTargetAmount in word_target_amount:
-        print(IMDBDataSet.__name__, "begin test")
-        print("word target amount", wordTargetAmount)
-        imdb_file_prefix = "./cache/" + IMDBDataSet.__name__ + "_" + str(fileTargetAmount) + "_"
-        IMDBDataSet.process(init_data_set=init_dataset("imdb", IMDBDataSet, fileTargetAmount,
-                                                       imdb_file_prefix),
-                            sample_data_set=sample_dataset(imdb_file_prefix + str(wordTargetAmount) + "_",
-                                                           wordTargetAmount, sample_strategy="topk"),
-                            process_data_set=process_dataset(
-                                imdb_file_prefix + str(wordTargetAmount) + "_",
-                                keep_percent=1, repeat_num=1)
-                            )
+    fileTargetAmount = 10000
+    # window_size = range(4, 16, 4)
+    word_target_amount = [5000]
+    keep_percent = [100]
+    # for windowSize in window_size:
+    #     print("window size", windowSize)
+    for keepPercent in keep_percent:
+        for wordTargetAmount in word_target_amount:
+            print("keep percent", keepPercent, "%")
+            print(EnronDataSet.__name__, "begin test")
+            print("word target amount", wordTargetAmount)
+            enron_file_prefix = "./cache/" + EnronDataSet.__name__ + "_" + str(fileTargetAmount) + "_"
+            EnronDataSet.process(init_data_set=init_dataset("maildir", EnronDataSet, fileTargetAmount,
+                                                            enron_file_prefix),
+                                 sample_data_set=sample_dataset(enron_file_prefix + str(wordTargetAmount) + "_"
+                                                                , wordTargetAmount,
+                                                                sample_strategy="deunique_topk"),
+                                 process_data_set=process_dataset(
+                                     enron_file_prefix + str(wordTargetAmount) + "_",
+                                     keep_percent=keepPercent * 0.01, repeat_num=1, windowSize=1)
+                                 )
+
+    # for keepPercent in keep_percent:
+    #     for wordTargetAmount in word_target_amount:
+    #         print(IMDBDataSet.__name__, "begin test")
+    #         print("keep percent", keepPercent,"%")
+    #         print("word target amount", wordTargetAmount)
+    #         imdb_file_prefix = "./cache/" + IMDBDataSet.__name__ + "_" + str(fileTargetAmount) + "_"
+    #         IMDBDataSet.process(init_data_set=init_dataset("imdb", IMDBDataSet, fileTargetAmount,
+    #                                                        imdb_file_prefix),
+    #                             sample_data_set=sample_dataset(imdb_file_prefix + str(wordTargetAmount) + "_",
+    #                                                            wordTargetAmount, sample_strategy="random"),
+    #                             process_data_set=process_dataset(
+    #                                 imdb_file_prefix + str(wordTargetAmount) + "_",
+    #                                 keep_percent=keepPercent*0.01, repeat_num=1)
+    #                             )
+
     # to cal cocounts
     # def f(data_set):
     #     bitmap = data_set.build_bitmap()
